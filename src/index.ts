@@ -30,7 +30,7 @@ export type IndexPhase = "scan" | "hash" | "chunk" | "embed" | "cleanup" | "fts"
 
 export interface IndexProgress {
   phase: IndexPhase;
-  /** Current item within the phase (1-based) */
+  /** Current item within the phase (0 before work starts, 1-based during) */
   current: number;
   /** Total items in this phase (0 if unknown) */
   total: number;
@@ -96,11 +96,26 @@ export class CodeIndex {
     // Get or create codebase entry
     const codebaseId = await store.getOrCreateCodebase(rootDir);
 
-    const progress = opts?.onProgress;
+    const progressRaw = opts?.onProgress;
+    let lastPct = -1;
+    let lastPhase: IndexPhase | "" = "";
+    function progress(p: IndexProgress) {
+      if (!progressRaw) return;
+      if (p.phase !== lastPhase) {
+        lastPhase = p.phase;
+        lastPct = -1;
+      }
+      if (p.total > 0) {
+        const pct = Math.floor((p.current / p.total) * 100);
+        if (pct === lastPct) return;
+        lastPct = pct;
+      }
+      progressRaw(p);
+    }
 
     // Phase 1: Scan directory for source files
     const t0 = performance.now();
-    progress?.({ phase: "scan", current: 0, total: 0 });
+    progress({ phase: "scan", current: 0, total: 0 });
     const { files, errors } = await scanDirectory(rootDir, opts?.languages);
     const scanTime = Math.round(performance.now() - t0);
 
@@ -123,7 +138,7 @@ export class CodeIndex {
       } else {
         filesToProcess.push(file);
       }
-      progress?.({ phase: "hash", current: fi + 1, total: files.length });
+      progress({ phase: "hash", current: fi + 1, total: files.length });
     }
 
     // Build embedding text for a chunk
@@ -187,7 +202,7 @@ export class CodeIndex {
         } catch (e: any) {
           errors.push(`${file.absPath}: ${e.message ?? String(e)}`);
         }
-        progress?.({ phase: "chunk", current: batchStart + bi + 1, total: filesToProcess.length });
+        progress({ phase: "chunk", current: batchStart + bi + 1, total: filesToProcess.length });
       }
 
       // Write chunks to DB
@@ -218,7 +233,7 @@ export class CodeIndex {
           })),
         );
         embedded += vectors.length;
-        progress?.({ phase: "embed", current: embedded, total: embedTotal });
+        progress({ phase: "embed", current: embedded, total: embedTotal });
       }
 
       if (stale.length < 1000) break;
@@ -227,11 +242,11 @@ export class CodeIndex {
     const chunkAndEmbedTime = Math.round(performance.now() - t1);
 
     // Phase 4: Remove chunks for deleted files
-    progress?.({ phase: "cleanup", current: 0, total: 0 });
+    progress({ phase: "cleanup", current: 0, total: 0 });
     const removed = await store.removeStaleFiles(codebaseId, activeFiles);
 
     // Phase 5: Build per-codebase FTS table
-    progress?.({ phase: "fts", current: 0, total: 0 });
+    progress({ phase: "fts", current: 0, total: 0 });
     const t3 = performance.now();
     await store.rebuildFtsTable(codebaseId);
     const ftsTime = Math.round(performance.now() - t3);
