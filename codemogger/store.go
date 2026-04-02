@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/tursodatabase/go-libsql"
 )
 
 type staleEmbedding struct {
@@ -36,11 +37,10 @@ func openStore(dbPath string) (*store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("libsql", fmt.Sprintf("file:%s", dbPath))
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	s := &store{db: db}
 	if err := s.init(); err != nil {
 		_ = db.Close()
@@ -50,16 +50,16 @@ func openStore(dbPath string) (*store, error) {
 }
 
 func (s *store) init() error {
-	statements := []string{
-		`PRAGMA journal_mode = WAL`,
-		`PRAGMA foreign_keys = ON`,
-		`PRAGMA busy_timeout = 5000`,
-	}
-	for _, stmt := range statements {
-		if _, err := s.db.Exec(stmt); err != nil {
-			return err
-		}
-	}
+	// statements := []string{
+	// 	`PRAGMA journal_mode = WAL`,
+	// 	`PRAGMA foreign_keys = ON`,
+	// 	`PRAGMA busy_timeout = 5000`,
+	// }
+	// for _, stmt := range statements {
+	// 	if _, err := s.db.Exec(stmt); err != nil {
+	// 		return err
+	// 	}
+	// }
 	for _, stmt := range baseSchema {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
@@ -296,7 +296,7 @@ func (s *store) batchUpsertEmbeddings(ctx context.Context, items []embeddingUpda
 		}
 	}()
 
-	stmt, err := tx.PrepareContext(ctx, `UPDATE chunks SET embedding = ?, embedding_model = ? WHERE chunk_key = ?`)
+	stmt, err := tx.PrepareContext(ctx, `UPDATE chunks SET embedding = vector8(?), embedding_model = ? WHERE chunk_key = ?`)
 	if err != nil {
 		return err
 	}
@@ -367,9 +367,19 @@ func (s *store) rebuildFTS(ctx context.Context) error {
 }
 
 func (s *store) vectorSearch(ctx context.Context, queryEmbedding []float32, limit int, includeSnippet bool) ([]SearchResult, error) {
-	query := `SELECT chunk_key, file_path, name, kind, signature, start_line, end_line, embedding FROM chunks WHERE embedding IS NOT NULL`
+	query := `SELECT chunk_key, file_path, name, kind, signature, start_line, end_line,
+                vector_distance_cos(embedding, vector8(?)) AS distance
+         FROM chunks
+         WHERE embedding IS NOT NULL
+         ORDER BY distance ASC
+         LIMIT ?`
 	if includeSnippet {
-		query = `SELECT chunk_key, file_path, name, kind, signature, snippet, start_line, end_line, embedding FROM chunks WHERE embedding IS NOT NULL`
+		query = `SELECT chunk_key, file_path, name, kind, signature, snippet, start_line, end_line,
+                vector_distance_cos(embedding, vector8(?)) AS distance
+         FROM chunks
+         WHERE embedding IS NOT NULL
+         ORDER BY distance ASC
+         LIMIT ?`
 	}
 
 	rows, err := s.db.QueryContext(ctx, query)

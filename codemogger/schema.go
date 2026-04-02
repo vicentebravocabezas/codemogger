@@ -21,7 +21,7 @@ var baseSchema = []string{
 		end_line INTEGER NOT NULL,
 		file_hash TEXT NOT NULL,
 		indexed_at INTEGER NOT NULL,
-		embedding BLOB,
+		embedding vector8(1024),
 		embedding_model TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_chunks_codebase_file ON chunks(codebase_id, file_path)`,

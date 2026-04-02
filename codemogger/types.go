@@ -53,9 +53,9 @@ type IndexResult struct {
 }
 
 type CodeIndexOptions struct {
-	DBPath         string
-	Embedder       Embedder
-	EmbeddingModel string
+	DBPath   string
+	Embedder Embedder
+	// EmbeddingModel string
 }
 
 type SearchResult struct {

@@ -45,9 +45,8 @@ func logoutUser() {}
 	}
 
 	index, err := New(CodeIndexOptions{
-		DBPath:         dbPath,
-		Embedder:       hashedEmbedder,
-		EmbeddingModel: "test-hash",
+		DBPath:   dbPath,
+		Embedder: hashedEmbedder,
 	})
 	if err != nil {
 		t.Fatal(err)

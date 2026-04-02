@@ -2,6 +2,7 @@ package codemogger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -37,9 +38,6 @@ func New(opts CodeIndexOptions) (*CodeIndex, error) {
 	if opts.Embedder == nil {
 		return nil, errors.New("embedder is required")
 	}
-	if opts.EmbeddingModel == "" {
-		return nil, errors.New("embedding model is required")
-	}
 
 	st, err := openStore(opts.DBPath)
 	if err != nil {
@@ -50,7 +48,7 @@ func New(opts CodeIndexOptions) (*CodeIndex, error) {
 		store:          st,
 		dbPath:         opts.DBPath,
 		embedder:       opts.Embedder,
-		embeddingModel: opts.EmbeddingModel,
+		embeddingModel: "bge-m3",
 	}, nil
 }
 
@@ -94,10 +92,7 @@ func (c *CodeIndex) Index(ctx context.Context, dir string, opts *IndexOptions) (
 	const fileBatch = 200
 	t1 := time.Now()
 	for batchStart := 0; batchStart < len(filesToProcess); batchStart += fileBatch {
-		end := batchStart + fileBatch
-		if end > len(filesToProcess) {
-			end = len(filesToProcess)
-		}
+		end := min(batchStart+fileBatch, len(filesToProcess))
 		batch := filesToProcess[batchStart:end]
 		batchChunks := make([]struct {
 			FilePath string
@@ -127,6 +122,10 @@ func (c *CodeIndex) Index(ctx context.Context, dir string, opts *IndexOptions) (
 				result.Chunks += len(chunks)
 			}
 			progress(IndexProgress{Phase: IndexPhaseChunk, Current: batchStart + i + 1, Total: len(filesToProcess)})
+			if i == 1 {
+				jsonBytes, _ := json.MarshalIndent(batchChunks, "", "  ")
+				fmt.Printf("%s\n", jsonBytes)
+			}
 		}
 
 		if len(batchChunks) > 0 {
@@ -152,10 +151,7 @@ func (c *CodeIndex) Index(ctx context.Context, dir string, opts *IndexOptions) (
 		}
 
 		for i := 0; i < len(stale); i += embedBatch {
-			end := i + embedBatch
-			if end > len(stale) {
-				end = len(stale)
-			}
+			end := min(i+embedBatch, len(stale))
 			slice := stale[i:end]
 			texts := make([]string, len(slice))
 			for j, item := range slice {
